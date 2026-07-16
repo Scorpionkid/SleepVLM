@@ -9,6 +9,12 @@
 # Usage:
 #   bash scripts/run_inference.sh
 #   MODEL_PATH=outputs/phase2_sft/merged bash scripts/run_inference.sh
+#
+# By default all detected GPUs are used (one server each, starting from GPU 0).
+# To use only specific GPUs (e.g. to skip a faulty one), set GPU_IDS to a
+# comma-separated list of physical GPU indices:
+#   GPU_IDS=1 bash scripts/run_inference.sh
+#   GPU_IDS=1,2,3 bash scripts/run_inference.sh
 
 set -euo pipefail
 
@@ -33,17 +39,24 @@ MAX_MODEL_LEN=${MAX_MODEL_LEN:-5000}
 
 mkdir -p "$OUTPUT_DIR"
 
-# --- Auto-detect GPUs ---
-GPU_COUNT=$(nvidia-smi -L 2>/dev/null | wc -l)
-if [ "$GPU_COUNT" -eq 0 ]; then
-    echo "Error: No GPUs detected"
-    exit 1
+# --- Determine which GPUs to use ---
+if [ -n "${GPU_IDS:-}" ]; then
+    IFS=',' read -ra GPU_ID_LIST <<< "$GPU_IDS"
+    echo "Using explicit GPU list: ${GPU_ID_LIST[*]}"
+else
+    GPU_COUNT=$(nvidia-smi -L 2>/dev/null | wc -l)
+    if [ "$GPU_COUNT" -eq 0 ]; then
+        echo "Error: No GPUs detected"
+        exit 1
+    fi
+    GPU_ID_LIST=($(seq 0 $((GPU_COUNT - 1))))
 fi
+NUM_GPU_SLOTS=${#GPU_ID_LIST[@]}
 
 # --- Cleanup any lingering vLLM processes ---
 cleanup_before_start() {
     echo "[CLEANUP] Checking for lingering processes..."
-    for offset in $(seq 0 $((GPU_COUNT - 1))); do
+    for offset in $(seq 0 $((NUM_GPU_SLOTS - 1))); do
         local port=$((BASE_PORT + offset))
         local pid=$(lsof -t -i :$port 2>/dev/null || true)
         if [[ -n "$pid" ]]; then
@@ -109,7 +122,7 @@ print(cfg.get('quantization_config', {}).get('quant_method', ''))
 fi
 
 successful_servers=0
-for gpu_id in $(seq 0 $((GPU_COUNT - 1))); do
+for gpu_id in "${GPU_ID_LIST[@]}"; do
     PORT=$((BASE_PORT + successful_servers))
 
     echo "[TRY] GPU ${gpu_id} -> port ${PORT}"
