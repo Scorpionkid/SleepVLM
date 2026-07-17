@@ -51,3 +51,11 @@ tensorboard/
 *.edf
 *.h5
 *.hdf5
+
+# 自动生成带时间戳备份文件
+split_hmc_*.json
+preprocess_hmc_*.py
+run_inference_*.sh
+
+# VSCode Local History插件历史目录
+.history/
